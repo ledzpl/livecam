@@ -3,6 +3,14 @@ import { isPointInViewport, normalizeLng } from "@/lib/geo";
 import type { SearchSeed } from "@/lib/live-search-seeds";
 import type { GeoViewport } from "@/lib/types";
 
+const QUERY_SUFFIXES = [
+  "live webcam",
+  "live cam",
+  "street live",
+  "city center live",
+  "walk live"
+];
+
 function toNumber(value: string | null): number | null {
   if (!value) {
     return null;
@@ -32,16 +40,35 @@ function cityDistanceScore(lat: number, lng: number, cityLat: number, cityLng: n
 }
 
 function maxSeedCountByZoom(zoom: number): number {
+  if (zoom >= 12) {
+    return 5;
+  }
   if (zoom >= 10) {
-    return 3;
+    return 5;
   }
   if (zoom >= 8) {
-    return 4;
-  }
-  if (zoom >= 6) {
     return 6;
   }
+  if (zoom >= 6) {
+    return 7;
+  }
   return 8;
+}
+
+function buildCitySeeds(cityNames: Array<{ key: string; name: string }>, limit: number): SearchSeed[] {
+  const seeds: SearchSeed[] = [];
+  for (const suffix of QUERY_SUFFIXES) {
+    for (const city of cityNames) {
+      if (seeds.length >= limit) {
+        return seeds;
+      }
+      seeds.push({
+        cityKey: city.key,
+        query: `${city.name} ${suffix}`
+      });
+    }
+  }
+  return seeds;
 }
 
 export function parseViewportFromRequest(request: Request): GeoViewport | null {
@@ -71,7 +98,7 @@ export function parseViewportFromRequest(request: Request): GeoViewport | null {
 
 export function buildSeedsForViewport(viewport: GeoViewport): SearchSeed[] {
   const center = viewportCenter(viewport);
-  const maxCities = maxSeedCountByZoom(viewport.zoom);
+  const maxSeeds = maxSeedCountByZoom(viewport.zoom);
 
   const visibleCities = CITY_CATALOG.filter((city) => isPointInViewport(city.lat, city.lng, viewport))
     .map((city) => ({
@@ -79,24 +106,23 @@ export function buildSeedsForViewport(viewport: GeoViewport): SearchSeed[] {
       score: cityDistanceScore(center.lat, center.lng, city.lat, city.lng)
     }))
     .sort((a, b) => a.score - b.score)
-    .slice(0, maxCities)
+    .slice(0, maxSeeds)
     .map((entry) => entry.city);
 
   if (visibleCities.length > 0) {
-    return visibleCities.map((city) => ({
-      cityKey: city.key,
-      query: `${city.name} live webcam`
-    }));
+    return buildCitySeeds(
+      visibleCities.map((city) => ({ key: city.key, name: city.name })),
+      maxSeeds
+    );
   }
 
-  return CITY_CATALOG.map((city) => ({
+  const nearbyCities = CITY_CATALOG.map((city) => ({
     city,
     score: cityDistanceScore(center.lat, center.lng, city.lat, city.lng)
   }))
     .sort((a, b) => a.score - b.score)
-    .slice(0, 4)
-    .map((entry) => ({
-      cityKey: entry.city.key,
-      query: `${entry.city.name} live webcam`
-    }));
+    .slice(0, Math.max(2, Math.ceil(maxSeeds / 2)))
+    .map((entry) => ({ key: entry.city.key, name: entry.city.name }));
+
+  return buildCitySeeds(nearbyCities, maxSeeds);
 }

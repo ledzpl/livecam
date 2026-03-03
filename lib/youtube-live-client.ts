@@ -37,7 +37,8 @@ type YouTubeVideosResponse = {
 
 const SEARCH_ENDPOINT = "https://www.googleapis.com/youtube/v3/search";
 const VIDEO_DETAILS_ENDPOINT = "https://www.googleapis.com/youtube/v3/videos";
-const YOUTUBE_REQUEST_TIMEOUT_MS = 7000;
+const YOUTUBE_REQUEST_TIMEOUT_MS = 12000;
+const SEARCH_MAX_RESULTS = "10";
 
 export type LiveSearchCandidate = {
   videoId: string;
@@ -75,7 +76,7 @@ async function fetchLiveSearch(apiKey: string, seed: SearchSeed): Promise<YouTub
     type: "video",
     eventType: "live",
     videoEmbeddable: "true",
-    maxResults: "3",
+    maxResults: SEARCH_MAX_RESULTS,
     q: seed.query
   });
 
@@ -111,7 +112,10 @@ export async function fetchLiveSearchCandidates(
     const seed = seeds[index];
     const candidates = result.value
       .map((item): LiveSearchCandidate | null => {
-        if (item.snippet?.liveBroadcastContent !== "live") {
+        if (
+          item.snippet?.liveBroadcastContent &&
+          item.snippet.liveBroadcastContent !== "live"
+        ) {
           return null;
         }
 
