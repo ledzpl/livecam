@@ -84,6 +84,7 @@ async function resolveSingleChannelId(apiKey: string, handle: string): Promise<s
   }
 
   const resolver = fetchChannelIdByHandle(apiKey, normalizedHandle)
+    .catch(() => null)
     .then((channelId) => {
       channelIdCache.set(normalizedHandle, {
         channelId,
@@ -104,7 +105,7 @@ export async function resolveChannelIdsByHandle(
   handles: string[]
 ): Promise<Map<string, string>> {
   const uniqueHandles = Array.from(new Set(handles.map(normalizeChannelHandle).filter(Boolean)));
-  const resolved = await Promise.all(
+  const settled = await Promise.allSettled(
     uniqueHandles.map(async (handle) => ({
       handle,
       channelId: await resolveSingleChannelId(apiKey, handle)
@@ -112,9 +113,13 @@ export async function resolveChannelIdsByHandle(
   );
 
   const map = new Map<string, string>();
-  for (const item of resolved) {
-    if (item.channelId) {
-      map.set(item.handle, item.channelId);
+  for (const item of settled) {
+    if (item.status !== "fulfilled") {
+      continue;
+    }
+
+    if (item.value.channelId) {
+      map.set(item.value.handle, item.value.channelId);
     }
   }
 

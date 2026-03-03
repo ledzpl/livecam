@@ -57,9 +57,7 @@ export async function GET(request: Request): Promise<Response> {
         continue;
       }
 
-      const matchedCity =
-        detectCityFromSnippet(candidate.title, candidate.description) ??
-        (result.seed.source === "channel" ? null : fallbackCity);
+      const matchedCity = detectCityFromSnippet(candidate.title, candidate.description) ?? fallbackCity;
       if (!matchedCity) {
         continue;
       }

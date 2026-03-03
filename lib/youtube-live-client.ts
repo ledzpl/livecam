@@ -117,13 +117,6 @@ export async function fetchLiveSearchCandidates(
     const seed = seeds[index];
     const candidates = result.value
       .map((item): LiveSearchCandidate | null => {
-        if (
-          item.snippet?.liveBroadcastContent &&
-          item.snippet.liveBroadcastContent !== "live"
-        ) {
-          return null;
-        }
-
         const videoId = item.id?.videoId;
         if (!videoId) {
           return null;
