@@ -80,6 +80,10 @@ async function fetchLiveSearch(apiKey: string, seed: SearchSeed): Promise<YouTub
     q: seed.query
   });
 
+  if (seed.channelId) {
+    params.set("channelId", seed.channelId);
+  }
+
   const response = await fetch(`${SEARCH_ENDPOINT}?${params.toString()}`, {
     headers: {
       Accept: "application/json"
@@ -91,7 +95,8 @@ async function fetchLiveSearch(apiKey: string, seed: SearchSeed): Promise<YouTub
   });
 
   if (!response.ok) {
-    throw new Error(`YouTube search request failed (${seed.query}): ${response.status}`);
+    const seedLabel = seed.channelId ? `${seed.query} [channel:${seed.channelId}]` : seed.query;
+    throw new Error(`YouTube search request failed (${seedLabel}): ${response.status}`);
   }
 
   const data = (await response.json()) as YouTubeSearchResponse;

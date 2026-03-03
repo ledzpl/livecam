@@ -1,18 +1,32 @@
 import { NextResponse } from "next/server";
 
-import { ASIA_SEARCH_SEEDS } from "@/lib/live-search-seeds";
+import {
+  buildWhitelistSeedsByCity,
+  cityKeysFromSeeds,
+  collectWhitelistHandlesByCity,
+  dedupeSearchSeeds
+} from "@/lib/channel-whitelist";
 import { isPointInViewport } from "@/lib/geo";
+import { ASIA_SEARCH_SEEDS, type SearchSeed } from "@/lib/live-search-seeds";
 import { buildSeedsForViewport, parseViewportFromRequest } from "@/lib/map-viewport";
 import { detectCityFromSnippet, getCityByKey } from "@/lib/location-matcher";
 import type { LiveStream } from "@/lib/types";
+import { resolveChannelIdsByHandle } from "@/lib/youtube-channel-client";
 import { fetchLiveDetailsByVideoId, fetchLiveSearchCandidates } from "@/lib/youtube-live-client";
 
 export const revalidate = 300;
+const MAX_CHANNEL_SEEDS = 10;
+const MAX_CHANNEL_HANDLES = 14;
+const MAX_TOTAL_SEEDS = 18;
+
+function mergeSearchSeeds(baseSeeds: SearchSeed[], channelSeeds: SearchSeed[]): SearchSeed[] {
+  return dedupeSearchSeeds([...baseSeeds, ...channelSeeds]).slice(0, MAX_TOTAL_SEEDS);
+}
 
 export async function GET(request: Request): Promise<Response> {
   const apiKey = process.env.YOUTUBE_API_KEY;
   const viewport = parseViewportFromRequest(request);
-  const activeSeeds = viewport ? buildSeedsForViewport(viewport) : ASIA_SEARCH_SEEDS;
+  const baseSeeds = viewport ? buildSeedsForViewport(viewport) : ASIA_SEARCH_SEEDS;
 
   if (!apiKey) {
     return NextResponse.json(
@@ -25,6 +39,13 @@ export async function GET(request: Request): Promise<Response> {
     );
   }
 
+  const activeCityKeys = cityKeysFromSeeds(baseSeeds.length > 0 ? baseSeeds : ASIA_SEARCH_SEEDS);
+  const whitelistHandles = collectWhitelistHandlesByCity(activeCityKeys, MAX_CHANNEL_HANDLES);
+  const handleChannelMap =
+    whitelistHandles.length > 0 ? await resolveChannelIdsByHandle(apiKey, whitelistHandles) : new Map();
+  const channelSeeds = buildWhitelistSeedsByCity(activeCityKeys, handleChannelMap, MAX_CHANNEL_SEEDS);
+  const activeSeeds = mergeSearchSeeds(baseSeeds, channelSeeds);
+
   const searchResults = await fetchLiveSearchCandidates(apiKey, activeSeeds);
   const draftStreams = new Map<string, LiveStream>();
 
@@ -36,7 +57,9 @@ export async function GET(request: Request): Promise<Response> {
         continue;
       }
 
-      const matchedCity = detectCityFromSnippet(candidate.title, candidate.description) ?? fallbackCity;
+      const matchedCity =
+        detectCityFromSnippet(candidate.title, candidate.description) ??
+        (result.seed.source === "channel" ? null : fallbackCity);
       if (!matchedCity) {
         continue;
       }
@@ -90,6 +113,7 @@ export async function GET(request: Request): Promise<Response> {
   return NextResponse.json({
     streams: scopedStreams,
     lastUpdatedAt: new Date().toISOString(),
-    searchedSeeds: activeSeeds.length
+    searchedSeeds: activeSeeds.length,
+    channelSeeds: channelSeeds.length
   });
 }

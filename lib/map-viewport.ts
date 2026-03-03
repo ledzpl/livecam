@@ -64,7 +64,8 @@ function buildCitySeeds(cityNames: Array<{ key: string; name: string }>, limit: 
       }
       seeds.push({
         cityKey: city.key,
-        query: `${city.name} ${suffix}`
+        query: `${city.name} ${suffix}`,
+        source: "query"
       });
     }
   }
