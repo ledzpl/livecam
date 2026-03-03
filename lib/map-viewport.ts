@@ -41,18 +41,18 @@ function cityDistanceScore(lat: number, lng: number, cityLat: number, cityLng: n
 
 function maxSeedCountByZoom(zoom: number): number {
   if (zoom >= 12) {
-    return 5;
+    return 2;
   }
   if (zoom >= 10) {
-    return 5;
+    return 3;
   }
   if (zoom >= 8) {
-    return 6;
+    return 4;
   }
   if (zoom >= 6) {
-    return 7;
+    return 5;
   }
-  return 8;
+  return 6;
 }
 
 function buildCitySeeds(cityNames: Array<{ key: string; name: string }>, limit: number): SearchSeed[] {

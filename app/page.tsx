@@ -19,7 +19,7 @@ export default function Home() {
   const [selectedVideoId, setSelectedVideoId] = useState<string | undefined>();
   const [modalStream, setModalStream] = useState<LiveStream | null>(null);
   const [viewport, setViewport] = useState<GeoViewport | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
   const requestSeqRef = useRef(0);
@@ -108,10 +108,6 @@ export default function Home() {
       }
     }
   }, []);
-
-  useEffect(() => {
-    loadStreams(null);
-  }, [loadStreams]);
 
   useEffect(() => {
     if (!viewport) {

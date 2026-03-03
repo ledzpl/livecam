@@ -12,15 +12,36 @@ import { buildSeedsForViewport, parseViewportFromRequest } from "@/lib/map-viewp
 import { detectCityFromSnippet, getCityByKey } from "@/lib/location-matcher";
 import type { LiveStream } from "@/lib/types";
 import { resolveChannelIdsByHandle } from "@/lib/youtube-channel-client";
-import { fetchLiveDetailsByVideoId, fetchLiveSearchCandidates } from "@/lib/youtube-live-client";
+import {
+  fetchLiveDetailsByVideoId,
+  fetchLiveSearchCandidates,
+  type LiveSearchFailure
+} from "@/lib/youtube-live-client";
 
 export const revalidate = 300;
-const MAX_CHANNEL_SEEDS = 10;
-const MAX_CHANNEL_HANDLES = 14;
-const MAX_TOTAL_SEEDS = 18;
+const MAX_CHANNEL_SEEDS = 2;
+const MAX_CHANNEL_HANDLES = 6;
+const MAX_TOTAL_SEEDS = 8;
 
 function mergeSearchSeeds(baseSeeds: SearchSeed[], channelSeeds: SearchSeed[]): SearchSeed[] {
   return dedupeSearchSeeds([...baseSeeds, ...channelSeeds]).slice(0, MAX_TOTAL_SEEDS);
+}
+
+function failureMessageFromYouTubeErrors(failures: LiveSearchFailure[]): string {
+  const reasons = new Set(failures.map((failure) => failure.reason));
+
+  if (reasons.has("quotaExceeded") || reasons.has("dailyLimitExceeded")) {
+    return "YouTube API 할당량(quota)을 초과했습니다. 잠시 후 다시 시도하거나 API 키 quota를 확인해 주세요.";
+  }
+
+  if (reasons.has("keyInvalid") || reasons.has("forbidden") || reasons.has("accessNotConfigured")) {
+    return "YOUTUBE_API_KEY가 유효하지 않거나 YouTube Data API 권한 설정에 문제가 있습니다.";
+  }
+
+  const first = failures[0];
+  const status = first?.statusCode ?? "ERR";
+  const reason = first?.reason ?? "unknown_error";
+  return `YouTube 검색 요청이 실패했습니다. (${status}, ${reason})`;
 }
 
 export async function GET(request: Request): Promise<Response> {
@@ -46,10 +67,21 @@ export async function GET(request: Request): Promise<Response> {
   const channelSeeds = buildWhitelistSeedsByCity(activeCityKeys, handleChannelMap, MAX_CHANNEL_SEEDS);
   const activeSeeds = mergeSearchSeeds(baseSeeds, channelSeeds);
 
-  const searchResults = await fetchLiveSearchCandidates(apiKey, activeSeeds);
+  const searchBatch = await fetchLiveSearchCandidates(apiKey, activeSeeds);
+  if (searchBatch.results.length === 0 && searchBatch.failures.length === activeSeeds.length) {
+    return NextResponse.json({
+      streams: [],
+      message: failureMessageFromYouTubeErrors(searchBatch.failures),
+      lastUpdatedAt: new Date().toISOString(),
+      searchedSeeds: activeSeeds.length,
+      channelSeeds: channelSeeds.length,
+      failedSeeds: searchBatch.failures.length
+    });
+  }
+
   const draftStreams = new Map<string, LiveStream>();
 
-  for (const result of searchResults) {
+  for (const result of searchBatch.results) {
     const fallbackCity = getCityByKey(result.seed.cityKey);
 
     for (const candidate of result.candidates) {
@@ -108,10 +140,19 @@ export async function GET(request: Request): Promise<Response> {
     ? streams.filter((stream) => isPointInViewport(stream.location.lat, stream.location.lng, viewport))
     : streams;
 
+  const message =
+    scopedStreams.length === 0
+      ? searchBatch.failures.length > 0
+        ? failureMessageFromYouTubeErrors(searchBatch.failures)
+        : "현재 지도 범위에서 검색된 라이브 방송이 없습니다. 지도를 이동하거나 줌 아웃 후 다시 시도해 주세요."
+      : undefined;
+
   return NextResponse.json({
     streams: scopedStreams,
+    message,
     lastUpdatedAt: new Date().toISOString(),
     searchedSeeds: activeSeeds.length,
-    channelSeeds: channelSeeds.length
+    channelSeeds: channelSeeds.length,
+    failedSeeds: searchBatch.failures.length
   });
 }

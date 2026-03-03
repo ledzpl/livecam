@@ -22,6 +22,17 @@ type YouTubeSearchResponse = {
   items?: YouTubeSearchItem[];
 };
 
+type YouTubeApiErrorPayload = {
+  error?: {
+    code?: number;
+    message?: string;
+    errors?: Array<{
+      reason?: string;
+      message?: string;
+    }>;
+  };
+};
+
 type YouTubeVideoItem = {
   id?: string;
   liveStreamingDetails?: {
@@ -54,6 +65,36 @@ export type LiveDetails = {
   scheduledStartTime?: string;
   viewerCount?: number;
 };
+
+export type LiveSearchFailure = {
+  seed: SearchSeed;
+  statusCode: number | null;
+  reason: string;
+  message: string;
+};
+
+export type LiveSearchResult = {
+  seed: SearchSeed;
+  candidates: LiveSearchCandidate[];
+};
+
+export type LiveSearchBatch = {
+  results: LiveSearchResult[];
+  failures: LiveSearchFailure[];
+};
+
+class YouTubeSearchError extends Error {
+  statusCode: number | null;
+  reason: string;
+  seed: SearchSeed;
+
+  constructor(seed: SearchSeed, statusCode: number | null, reason: string, message: string) {
+    super(message);
+    this.statusCode = statusCode;
+    this.reason = reason;
+    this.seed = seed;
+  }
+}
 
 function thumbnailFromSnippet(item: YouTubeSearchItem): string {
   return (
@@ -95,8 +136,10 @@ async function fetchLiveSearch(apiKey: string, seed: SearchSeed): Promise<YouTub
   });
 
   if (!response.ok) {
-    const seedLabel = seed.channelId ? `${seed.query} [channel:${seed.channelId}]` : seed.query;
-    throw new Error(`YouTube search request failed (${seedLabel}): ${response.status}`);
+    const payload = (await response.json().catch(() => null)) as YouTubeApiErrorPayload | null;
+    const reason = payload?.error?.errors?.[0]?.reason ?? "unknown_error";
+    const message = payload?.error?.message ?? `HTTP ${response.status}`;
+    throw new YouTubeSearchError(seed, response.status, reason, message);
   }
 
   const data = (await response.json()) as YouTubeSearchResponse;
@@ -106,15 +149,35 @@ async function fetchLiveSearch(apiKey: string, seed: SearchSeed): Promise<YouTub
 export async function fetchLiveSearchCandidates(
   apiKey: string,
   seeds: SearchSeed[]
-): Promise<Array<{ seed: SearchSeed; candidates: LiveSearchCandidate[] }>> {
+): Promise<LiveSearchBatch> {
   const settled = await Promise.allSettled(seeds.map((seed) => fetchLiveSearch(apiKey, seed)));
+  const results: LiveSearchResult[] = [];
+  const failures: LiveSearchFailure[] = [];
 
-  return settled.flatMap((result, index) => {
+  settled.forEach((result, index) => {
+    const seed = seeds[index];
+
     if (result.status !== "fulfilled") {
-      return [];
+      const reason =
+        result.reason instanceof YouTubeSearchError ? result.reason.reason : "request_failed";
+      const statusCode =
+        result.reason instanceof YouTubeSearchError ? result.reason.statusCode : null;
+      const message =
+        result.reason instanceof YouTubeSearchError
+          ? result.reason.message
+          : result.reason instanceof Error
+            ? result.reason.message
+            : "Unknown error";
+
+      failures.push({
+        seed,
+        statusCode,
+        reason,
+        message
+      });
+      return;
     }
 
-    const seed = seeds[index];
     const candidates = result.value
       .map((item): LiveSearchCandidate | null => {
         const videoId = item.id?.videoId;
@@ -133,8 +196,10 @@ export async function fetchLiveSearchCandidates(
       })
       .filter((candidate): candidate is LiveSearchCandidate => Boolean(candidate));
 
-    return [{ seed, candidates }];
+    results.push({ seed, candidates });
   });
+
+  return { results, failures };
 }
 
 export async function fetchLiveDetailsByVideoId(
